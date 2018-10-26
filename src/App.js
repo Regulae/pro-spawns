@@ -90,6 +90,140 @@ class App extends Component {
             this.filter();
 
         });
+
+        this.__parse_from_forum();
+    }
+
+    __parse_from_forum() {
+        // how to get the data:
+        // https://pokemonrevolution.net/forum/index.php?threads/%E2%99%A6-complete-pro-pokedex-all-pokemon-all-spawns-6-8-18-%E2%99%A6.96899/page-2
+        // let temp = Object.values($('code').map(function(index, el){return $(el).text()})).filter(el => el.length > 0);
+        // temp.pop();
+        // copy(temp);
+        const source = require('./resources/json/__spawn_data_forum');
+        const pokemon_id_by_name = require('./resources/json/pokemon_ids_by_name');
+        const area_regions = require('./resources/json/area_regions');
+
+        const spawnData = [];
+
+        const spawnTypes = {};
+
+        source.forEach(line => {
+            //     let line = source[2];
+            let entries = line.split("\n");
+            let name = entries.shift().trim();
+
+
+            const regex = /^(#(Map|Pokemon) +)(Area +)(Daytime +)(Rarity +)(MS +)(Level +)Item$/;
+            let matches;
+
+            matches = regex.exec(entries.shift());
+
+            if (matches === null) {
+                throw new Error('this should not happen');
+            }
+
+            let strlenMap = matches[1].length,
+                strlenArea = matches[3].length,
+                strlenDaytime = matches[4].length,
+                strlenRarity = matches[5].length,
+                strlenMs = matches[6].length,
+                strlenLevel = matches[7].length;
+
+            entries.forEach(entry => {
+
+                let spawnDataEntry = {
+                    pokedexNumber: pokemon_id_by_name[name],
+                    pokemon: name,
+                    area: null,
+                    region: null,
+                    spawnLand: false,
+                    spawnSurf: false,
+                    spawnFish: false,
+                    spawnHeadbutt: false,
+                    spawnReward: false,
+                    spawnExcavation: false,
+                    excavationTime: null,
+                    morning: false,
+                    day: false,
+                    night: false,
+                    rod: null,
+                    rewarder: null,
+                    membership: false,
+                    levels: 0,
+                    min: 0,
+                    max: 0,
+                    heldItem: null,
+                    tier: null
+                };
+
+                let area = entry.substr(0, strlenMap).trim(),
+                    spawnType = entry.substr(strlenMap, strlenArea).trim(),
+                    daytime = entry.substr(strlenMap + strlenArea, strlenDaytime).trim().split('/'),
+                    rarity = entry.substr(strlenMap + strlenArea + strlenDaytime, strlenRarity).trim(),
+                    ms = entry.substr(strlenMap + strlenArea + strlenDaytime + strlenRarity, strlenMs).trim(),
+                    level = entry.substr(strlenMap + strlenArea + strlenDaytime + strlenRarity + strlenMs, strlenLevel).trim(),
+                    item = entry.substr(strlenMap + strlenArea + strlenDaytime + strlenRarity + strlenMs + strlenLevel).trim();
+
+                spawnDataEntry.area = area;
+                spawnDataEntry.tier = rarity.replace('Tier ', '');
+                spawnDataEntry.heldItem = item;
+
+                spawnDataEntry.region = area_regions[area];
+
+                spawnDataEntry._sortArea = this.regionSorting[spawnDataEntry.region] + ' - ' + spawnDataEntry.region + ' - ' + spawnDataEntry.area;
+
+                if (spawnType === 'Land') spawnDataEntry.spawnLand = true;
+                if (spawnType === 'Headbutt') spawnDataEntry.spawnHeadbutt = true;
+                if (spawnType === 'Excavation') {
+                    spawnDataEntry.spawnExcavation = true;
+                    spawnDataEntry.excavationTime = daytime;
+                }
+
+                let regexReward = /^(.*) \(Reward\)$/;
+                if ((matches = regexReward.exec(spawnType)) !== null) {
+                    spawnDataEntry.spawnReward = true;
+                    spawnDataEntry.rewarder = matches[1];
+                } else {
+                    spawnTypes[spawnType] = 1;
+                }
+
+                if (spawnType.startsWith('Surf')) spawnDataEntry.spawnSurf = true;
+
+                let regexRod = /Fish \((Good|Super|Old) Rod\)$/;
+                if ((matches = regexRod.exec(spawnType)) !== null) {
+                    spawnDataEntry.rod = matches[1];
+                    spawnDataEntry.spawnFish = true;
+                }
+
+                spawnDataEntry.levels = level;
+                // spawnDataEntry.min = parseInt(!!level.match(/^(\d+)-(\d+)$/) ? level.replace(/^(\d+)-(\d+)$/, '$1') : level, 10);
+                spawnDataEntry.min = parseInt(level, 10);
+                spawnDataEntry.max = parseInt(!!level.match(/^(\d+)-(\d+)$/) ? level.replace(/^(\d+)-(\d+)$/, '$2') : level, 10);
+
+                spawnDataEntry.membership = ms.length > 0;
+
+                spawnDataEntry.morning = daytime.indexOf('M') > -1;
+                spawnDataEntry.day = daytime.indexOf('D') > -1;
+                spawnDataEntry.night = daytime.indexOf('N') > -1;
+
+                if (spawnType === '') {
+                    console.error(name, line);
+                    // Psyduck Fish Old
+                    // Slowpoke Fish Good
+                }
+
+                spawnData.push(spawnDataEntry);
+            });
+
+        });
+
+        console.log(_.filter(spawnData, {spawnLand: true}));
+        console.log(spawnData.filter(entry => entry.spawnFish || entry.spawnSurf));
+        console.log(_.filter(spawnData, {spawnHeadbutt: true}));
+        console.log(_.filter(spawnData, {spawnExcavation: true}));
+        console.log(_.filter(spawnData, {spawnReward: true}));
+
     }
 
     _dataParser(data, type) {
@@ -314,7 +448,7 @@ class App extends Component {
 
     renderTable(type, data) {
         if (data.length === 0) {
-            return <Segment>No results for {this.getSourceTypeLabel(type)}</Segment>
+            return <Segment key={type}>No results for {this.getSourceTypeLabel(type)}</Segment>
         }
 
         const icon_morning = <img src="https://img.pokemondb.net/images/locations/morning.png" alt="Morning" title="Morning"/>;
@@ -438,7 +572,10 @@ class App extends Component {
                             clearable
                             value={this.state.filter.name}
                             onChange={(e, obj) => this.setFilter({name: obj.value})}
-                            options={require('./resources/json/pokemon_names').map(name => {return {key: name, value: name, text: name}})}
+                            options={require('./resources/json/pokemon_names')
+                                .filter(entry => parseInt(entry.id, 10) < 722)
+                                .sort((a,b) => a.name.localeCompare(b.name))
+                                .map(entry => {return {key: entry.id, value: entry.name, text: entry.name}})}
                         />
 
                         &nbsp;
